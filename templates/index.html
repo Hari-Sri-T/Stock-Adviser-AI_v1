@@ -1,0 +1,465 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Stock Advisor</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- ADD CHART.JS LIBRARY -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Dancing+Script:wght@700&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #000; 
+            position: relative; 
+        }
+        body::before {
+            content: '';
+            position: fixed;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            background-image: url('https://i.ibb.co/gFjWdSzK/background.jpg');
+            background-size: cover;
+            background-position: center;
+            opacity: 0.5;
+            z-index: -1; 
+        }
+        .font-cursive { font-family: 'Dancing Script', cursive; }
+        .glass-panel {
+            background: rgba(0, 0, 0, 0.4);
+            backdrop-filter: blur(15px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 1.5rem;
+        }
+        .glow-text {
+            text-shadow: 0 0 8px rgba(255, 255, 255, 0.7),
+                         0 0 10px rgba(255, 255, 255, 0.5);
+        }
+        .btn {
+            transition: all 0.3s ease;
+            box-shadow: 0 0 10px rgba(0,0,0, 0.5);
+        }
+        .btn:hover {
+            transform: scale(1.05);
+        }
+        .page { transition: opacity 0.7s ease-in-out; }
+        .hidden-page { opacity: 0; pointer-events: none; position: absolute; }
+        .hidden { display: none; }
+        .rec-btn {
+            padding: 0.5rem 1rem;
+            border-radius: 9999px;
+            font-weight: 700;
+            color: white;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+        .rec-buy { background-color: #16a34a; box-shadow: 0 0 20px rgba(34, 197, 94, 0.7); }
+        .rec-sell { background-color: #dc2626; box-shadow: 0 0 20px rgba(239, 68, 68, 0.7); }
+        .rec-hold { background-color: #4b5563; box-shadow: 0 0 20px rgba(107, 114, 128, 0.7); }
+        .scrollable-content::-webkit-scrollbar { width: 6px; }
+        .scrollable-content::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.2); border-radius: 3px; }
+        .scrollable-content::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.4); }
+        /* Style for active time range button */
+        .time-range-btn.active {
+            background-color: #059669; /* A shade of green */
+            color: white;
+        }
+    </style>
+</head>
+<body class="text-white">
+
+    <!-- Welcome Page -->
+    <div id="welcome-page" class="page min-h-screen w-full flex items-center justify-center">
+        <div class="glass-panel text-center p-8 md:p-12">
+            <h1 class="text-5xl md:text-7xl font-extrabold glow-text">Stock Advisor</h1>
+            <p class="mt-4 text-2xl md:text-3xl text-gray-200 font-cursive">Don't Follow the Herd</p>
+            <button id="startButton" class="btn bg-green-700 hover:bg-green-600 mt-8 px-8 py-3 rounded-full text-lg font-bold">
+                Start
+            </button>
+        </div>
+    </div>
+
+    <!-- Main App Page -->
+    <div id="main-app" class="page min-h-screen w-full flex items-center justify-center hidden-page">
+        <div class="glass-panel w-11/11 md:w-3/4 lg:w-2/3 h-[85vh] p-6 md:p-8 flex flex-col">
+            <!-- This view contains the search and stock grid -->
+            <div id="list-view" class="flex flex-col h-full">
+                <div class="flex-shrink-0">
+                    <input id="searchInput" type="text" class="w-full p-3 bg-black bg-opacity-30 border-2 border-gray-600 rounded-lg focus:ring-2 focus:ring-green-400 focus:border-green-400 outline-none transition" placeholder="Search to add or analyze stocks...">
+                    <h3 id="stock-list-title" class="text-xl font-bold mt-4 mb-2 text-gray-300"></h3>
+                </div>
+                <div id="stockList" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4 flex-grow overflow-y-auto pr-2 items-start">
+                    <!-- Marked and Searched stocks will be loaded here -->
+                </div>
+            </div>
+            <!-- This view shows the analysis result -->
+            <div id="analysis-view" class="hidden h-full">
+                 <!-- Analysis result content will be injected here -->
+            </div>
+        </div>
+    </div>
+    
+    <!-- Loader Overlay -->
+    <div id="loader" class="page fixed inset-0 bg-black bg-opacity-70 backdrop-blur-sm flex flex-col items-center justify-center hidden-page z-50">
+        <h2 class="text-4xl font-bold glow-text animate-pulse">Thinking...</h2>
+        <p class="mt-6 text-2xl text-gray-300 font-cursive">"Cut your losses short and let your profits run."</p>
+        <p class="mt-2 text-lg text-gray-400">- David Ricardo</p>
+    </div>
+
+    <script>
+        const welcomePage = document.getElementById('welcome-page');
+        const mainApp = document.getElementById('main-app');
+        const loader = document.getElementById('loader');
+        const startButton = document.getElementById('startButton');
+        const listView = document.getElementById('list-view');
+        const analysisView = document.getElementById('analysis-view');
+        const stockListEl = document.getElementById('stockList');
+        const stockListTitleEl = document.getElementById('stock-list-title');
+        const searchInputEl = document.getElementById('searchInput');
+
+        const API_BASE_URL = 'http://127.0.0.1:5000';
+        let stockChart = null; // Variable to hold the chart instance
+
+        // --- Marked Stocks Logic ---
+        const getMarkedStocks = () => {
+            try {
+                const stored = localStorage.getItem('marked-stocks');
+                if (!stored) return [];
+                const parsed = JSON.parse(stored);
+                return Array.isArray(parsed) ? parsed : [];
+            } catch (e) {
+                console.error("Could not parse marked stocks from localStorage:", e);
+                return [];
+            }
+        };
+        const saveMarkedStocks = (stocks) => localStorage.setItem('marked-stocks', JSON.stringify(stocks));
+        const isStockMarked = (symbol) => getMarkedStocks().some(s => s.symbol === symbol);
+
+        function markStock(stock) {
+            const stocks = getMarkedStocks();
+            if (!isStockMarked(stock.symbol)) {
+                stocks.push(stock);
+                saveMarkedStocks(stocks);
+            }
+        }
+
+        function unmarkStock(symbol) {
+            let stocks = getMarkedStocks();
+            stocks = stocks.filter(s => s.symbol !== symbol);
+            saveMarkedStocks(stocks);
+        }
+
+        async function initializeDefaultMarkedStocks() {
+            if (localStorage.getItem('marked-stocks') === null) {
+                stockListEl.innerHTML = `<p class="text-gray-400 col-span-full text-center animate-pulse">Setting up your default watchlist...</p>`;
+                const defaultSymbols = ['AAPL', 'GOOG', 'MSFT', 'AMZN', 'TSLA', 'NVDA', 'META', 'NFLX', 'WMT', 'JPM'];
+                try {
+                    const res = await fetch(`${API_BASE_URL}/stocks?q=${defaultSymbols.join(',')}`);
+                    if (!res.ok) {
+                        const errorData = await res.json();
+                        throw new Error(errorData.error || `Server responded with status ${res.status}`);
+                    }
+                    const defaultStocks = await res.json();
+                    saveMarkedStocks(defaultStocks);
+                } catch (error) {
+                    console.error("Failed to initialize default stocks:", error);
+                    stockListEl.innerHTML = `<p class="text-red-400 col-span-full text-center px-4">${error.message}</p>`;
+                    saveMarkedStocks([]);
+                }
+            }
+        }
+
+        // --- Page Transitions & Initialization ---
+        startButton.addEventListener('click', async () => {
+            welcomePage.classList.add('hidden-page');
+            mainApp.classList.remove('hidden-page');
+            await initializeDefaultMarkedStocks();
+            loadInitialView();
+        });
+
+        function loadInitialView() {
+            showListView();
+            searchInputEl.value = '';
+            stockListTitleEl.textContent = 'Your Marked Stocks';
+            const markedStocks = getMarkedStocks();
+            if (markedStocks.length > 0) {
+                renderStockCards(markedStocks);
+            } else {
+                 if (!stockListEl.querySelector('.text-red-400')) {
+                    stockListEl.innerHTML = `<p class="text-gray-400 col-span-full text-center">You have no marked stocks. Use the search bar to find and add some.</p>`;
+                }
+            }
+        }
+        
+        // --- API Calls & Rendering ---
+        async function fetchAndDisplayStocks(query = "") {
+            stockListEl.innerHTML = `<p class="text-gray-400 col-span-full text-center animate-pulse">Searching...</p>`;
+            try {
+                const res = await fetch(`${API_BASE_URL}/stocks?q=${encodeURIComponent(query)}`);
+                if (!res.ok) {
+                    const errorData = await res.json();
+                    throw new Error(errorData.error || `Server responded with status ${res.status}`);
+                }
+                const stocks = await res.json();
+                if (stocks.length === 0 && query) {
+                     stockListEl.innerHTML = `<p class="text-gray-400 col-span-full text-center">No results found for "${query}"</p>`;
+                     return;
+                }
+                renderStockCards(stocks);
+            } catch (error) {
+                console.error("Failed to load stocks:", error);
+                stockListEl.innerHTML = `<p class="text-red-400 col-span-full text-center">${error.message}</p>`;
+            }
+        }
+        
+        function renderStockCards(stocks) {
+            stockListEl.innerHTML = "";
+            stocks.forEach(stock => {
+                const stockCard = document.createElement("div");
+                const isMarked = isStockMarked(stock.symbol);
+
+                stockCard.className = "stock-card p-3 bg-black bg-opacity-20 rounded-lg text-center flex flex-col";
+                stockCard.dataset.symbol = stock.symbol;
+                stockCard.dataset.name = stock.name || stock.symbol;
+                stockCard.dataset.logo = stock.logo || '';
+
+                stockCard.innerHTML = `
+                    <div class="flex-grow mb-3">
+                        <img src="${stock.logo || 'https://placehold.co/40x40/222/FFF?text=?'}" onerror="this.onerror=null;this.src='https://placehold.co/40x40/222/FFF?text=?';" class="w-10 h-10 mx-auto rounded-full bg-white p-0.5" alt="${stock.name || 'N/A'} logo">
+                        <p class="text-sm font-bold mt-2 truncate w-full">${stock.name || stock.symbol}</p>
+                        <p class="text-xs text-gray-400 w-full">${stock.symbol}</p>
+                    </div>
+                    <div class="mt-auto w-full flex flex-col space-y-2">
+                        <button class="btn analyze-btn text-xs bg-gray-600 hover:bg-gray-500 w-full py-1 rounded-md font-semibold">Analyze</button>
+                        <button class="btn mark-btn text-xs w-full py-1 rounded-md font-semibold ${isMarked ? 'bg-gray-800 hover:bg-gray-700' : 'bg-gray-600 hover:bg-gray-500'}">
+                            ${isMarked ? 'Unmark' : 'Mark'}
+                        </button>
+                    </div>
+                `;
+                stockListEl.appendChild(stockCard);
+            });
+        }
+
+        async function analyzeStock(stock) {
+            loader.classList.remove('hidden-page');
+            try {
+                const res = await fetch(`${API_BASE_URL}/analyze?symbol=${stock.symbol}`);
+                if (!res.ok) {
+                    const errorData = await res.json();
+                    throw new Error(errorData.error || `Server responded with status ${res.status}`);
+                }
+                const data = await res.json();
+                renderAnalysis(data, stock);
+                // After rendering, fetch and draw the chart
+                await updateChart(stock.symbol, '1y');
+            } catch (error) {
+                console.error("Analysis error:", error);
+                analysisView.innerHTML = `<div class="text-center p-8"><h3 class="text-2xl font-bold text-red-400">Analysis Failed</h3><p class="text-gray-300 mt-2">${error.message}</p> <button id="back-from-error-btn" class="btn bg-gray-600 hover:bg-gray-500 mt-4 px-4 py-2 rounded-lg">Back to List</button></div>`;
+                document.getElementById('back-from-error-btn').onclick = showListView;
+            } finally {
+                loader.classList.add('hidden-page');
+                showAnalysisView();
+            }
+        }
+
+        // --- NEW CHARTING FUNCTIONS ---
+        async function updateChart(symbol, period) {
+            try {
+                const res = await fetch(`${API_BASE_URL}/history?symbol=${symbol}&period=${period}`);
+                if (!res.ok) {
+                    const errorData = await res.json();
+                    throw new Error(errorData.error || 'Failed to fetch history');
+                }
+                const data = await res.json();
+                renderChart(data);
+
+                // Update active button style
+                document.querySelectorAll('.time-range-btn').forEach(btn => {
+                    btn.classList.remove('active');
+                    if (btn.dataset.period === period) {
+                        btn.classList.add('active');
+                    }
+                });
+
+            } catch (error) {
+                console.error(`Chart update error for ${period}:`, error);
+                const chartContainer = document.getElementById('chart-container');
+                if(chartContainer) chartContainer.innerHTML = `<p class="text-red-400 text-center">${error.message}</p>`;
+            }
+        }
+        
+        function renderChart(data) {
+            const chartContainer = document.getElementById('chart-container');
+            if (!chartContainer) return;
+
+            // Destroy previous chart instance if it exists
+            if (stockChart) {
+                stockChart.destroy();
+            }
+            
+            const ctx = document.getElementById('stockChartCanvas').getContext('2d');
+            const lastPrice = data.prices[data.prices.length - 1];
+            const firstPrice = data.prices[0];
+            const borderColor = lastPrice >= firstPrice ? '#22c55e' : '#ef4444'; // Green for up, Red for down
+
+            stockChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: data.dates,
+                    datasets: [{
+                        label: 'Close Price',
+                        data: data.prices,
+                        borderColor: borderColor,
+                        borderWidth: 2,
+                        tension: 0.1,
+                        pointRadius: 0, // Hide points on the line
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        x: {
+                            ticks: { color: '#9ca3af' }, // Light gray for x-axis labels
+                            grid: { color: 'rgba(255, 255, 255, 0.1)' }
+                        },
+                        y: {
+                            ticks: { color: '#9ca3af' }, // Light gray for y-axis labels
+                            grid: { color: 'rgba(255, 255, 255, 0.1)' }
+                        }
+                    },
+                    plugins: {
+                        legend: { display: false }
+                    }
+                }
+            });
+        }
+
+        function renderAnalysis(data, stockInfo) {
+            const getRecommendationClass = (r) => (r && r.toLowerCase().includes('buy')) ? 'rec-buy' : (r && r.toLowerCase().includes('sell')) ? 'rec-sell' : 'rec-hold';
+            const recommendationClass = getRecommendationClass(data.recommendation);
+
+            analysisView.innerHTML = `
+                <div class="h-full flex flex-col">
+                    <div class="flex items-center justify-between pb-4 border-b border-gray-700 flex-shrink-0">
+                        <div class="flex items-center space-x-4">
+                            <img src="${stockInfo.logo || 'https://placehold.co/48x48/222/FFF?text=?'}" onerror="this.onerror=null;this.src='https://placehold.co/48x48/222/FFF?text=?';" class="w-12 h-12 rounded-full bg-white p-1" alt="${data.symbol} logo">
+                            <div>
+                                <h2 class="text-3xl font-bold glow-text">${data.symbol}</h2>
+                                <p class="text-gray-400">${stockInfo.name}</p>
+                            </div>
+                        </div>
+                        <div class="rec-btn ${recommendationClass}">${data.recommendation}</div>
+                    </div>
+                    
+                    <!-- CHART SECTION -->
+                    <div class="my-4 h-48 md:h-64 bg-black bg-opacity-20 rounded-lg p-2">
+                         <div id="chart-container" class="h-full w-full relative">
+                            <canvas id="stockChartCanvas"></canvas>
+                        </div>
+                    </div>
+                    <div class="flex justify-center space-x-2 mb-4">
+                        <button class="time-range-btn btn text-xs bg-gray-700 hover:bg-gray-600 px-3 py-1 rounded-full" data-symbol="${data.symbol}" data-period="1mo">1M</button>
+                        <button class="time-range-btn btn text-xs bg-gray-700 hover:bg-gray-600 px-3 py-1 rounded-full active" data-symbol="${data.symbol}" data-period="1y">1Y</button>
+                        <button class="time-range-btn btn text-xs bg-gray-700 hover:bg-gray-600 px-3 py-1 rounded-full" data-symbol="${data.symbol}" data-period="ytd">YTD</button>
+                        <button class="time-range-btn btn text-xs bg-gray-700 hover:bg-gray-600 px-3 py-1 rounded-full" data-symbol="${data.symbol}" data-period="max">Max</button>
+                    </div>
+
+
+                    <div class="flex-grow overflow-y-auto pr-4 scrollable-content">
+                        <div class="space-y-6">
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-center">
+                                <div class="bg-black bg-opacity-20 p-4 rounded-lg">
+                                    <h4 class="text-sm text-gray-400">Last Close</h4>
+                                    <p class="text-2xl font-semibold">$${data.last_close.toFixed(2)}</p>
+                                </div>
+                                <div class="bg-black bg-opacity-20 p-4 rounded-lg">
+                                    <h4 class="text-sm text-gray-400">AI Predicted Next Close</h4>
+                                    <p class="text-2xl font-semibold">$${data.predicted_close.toFixed(2)}</p>
+                                </div>
+                            </div>
+                            <div>
+                                <h3 class="text-xl font-bold mb-2">AI Explanation</h3>
+                                <div class="bg-black bg-opacity-20 p-4 rounded-lg text-gray-300 space-y-2">${data.explanation.replace(/\n/g, '<br>')}</div>
+                            </div>
+                            <div>
+                                <h3 class="text-xl font-bold mb-2">Key News Summary</h3>
+                                <div class="bg-black bg-opacity-20 p-4 rounded-lg text-gray-300 space-y-2">${data.latest_news_summary.replace(/\n/g, '<br>')}</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="flex-shrink-0 pt-4 mt-auto">
+                         <button id="back-to-list-btn" class="btn bg-gray-600 hover:bg-gray-500 w-full py-2 rounded-lg font-semibold">Back to List</button>
+                    </div>
+                </div>
+            `;
+            document.getElementById('back-to-list-btn').onclick = showListView;
+        }
+
+        // --- View Management ---
+        function showListView() {
+            analysisView.innerHTML = '';
+            analysisView.classList.add('hidden');
+            listView.classList.remove('hidden');
+        }
+
+        function showAnalysisView() {
+            listView.classList.add('hidden');
+            analysisView.classList.remove('hidden');
+        }
+
+        // --- Event Listeners ---
+        let searchTimeout;
+        searchInputEl.addEventListener("input", (e) => {
+            clearTimeout(searchTimeout);
+            searchTimeout = setTimeout(() => {
+                const query = e.target.value.trim();
+                if (query) {
+                    stockListTitleEl.textContent = `Search Results for "${query}"`;
+                    fetchAndDisplayStocks(query);
+                } else {
+                    loadInitialView(); 
+                }
+            }, 300);
+        });
+
+        // Event Delegation for ALL Clicks in the app
+        document.body.addEventListener('click', (e) => {
+            // Clicks on Stock Cards in the List View
+            const card = e.target.closest('.stock-card');
+            if (card) {
+                const stock = {
+                    symbol: card.dataset.symbol,
+                    name: card.dataset.name,
+                    logo: card.dataset.logo
+                };
+                if (e.target.closest('.analyze-btn')) analyzeStock(stock);
+                else if (e.target.closest('.mark-btn')) {
+                    const markBtn = e.target.closest('.mark-btn');
+                    const isCurrentlyMarked = isStockMarked(stock.symbol);
+                    if (isCurrentlyMarked) unmarkStock(stock.symbol);
+                    else markStock(stock);
+                    if (isCurrentlyMarked && !searchInputEl.value.trim()) loadInitialView();
+                    else {
+                        const isNowMarked = !isCurrentlyMarked;
+                        markBtn.textContent = isNowMarked ? 'Unmark' : 'Mark';
+                        markBtn.className = `btn mark-btn text-xs w-full py-1 rounded-md font-semibold ${isNowMarked ? 'bg-gray-800 hover:bg-gray-700' : 'bg-gray-600 hover:bg-gray-500'}`;
+                    }
+                }
+                return; // Stop further processing
+            }
+
+            // Clicks on Time Range Buttons in the Analysis View
+            const timeBtn = e.target.closest('.time-range-btn');
+            if (timeBtn) {
+                updateChart(timeBtn.dataset.symbol, timeBtn.dataset.period);
+            }
+        });
+    </script>
+</body>
+</html>
+
+

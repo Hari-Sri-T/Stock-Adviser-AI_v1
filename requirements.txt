@@ -1,0 +1,10 @@
+flask
+tensorflow
+scikit-learn
+pandas
+numpy
+yfinance
+requests
+python-dotenv
+google-generativeai
+finnhub-python
