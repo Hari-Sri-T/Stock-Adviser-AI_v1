@@ -152,6 +152,21 @@
             saveMarkedStocks(stocks);
         }
 
+        function convertMarkdownToHTML(text) {
+            if (!text) return '';
+            // Convert **bold** to <strong>bold</strong>
+            let html = text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+            
+            // Convert * bullets to <ul><li> ... </li></ul>
+            html = html.replace(/(?:\r?\n)?\* (.*?)(?=\n|$)/g, '<li>$1</li>');
+            html = html.replace(/(<li>.*<\/li>)/gs, '<ul>$1</ul>');
+
+            // Convert newlines to <br>
+            html = html.replace(/\n/g, '<br>');
+            
+            return html;
+        }
+
         async function initializeDefaultMarkedStocks() {
             if (localStorage.getItem('marked-stocks') === null) {
                 stockListEl.innerHTML = `<p class="text-gray-400 col-span-full text-center animate-pulse">Setting up your default watchlist...</p>`;
@@ -246,15 +261,18 @@
         async function analyzeStock(stock) {
             loader.classList.remove('hidden-page');
             try {
+                // We only need one API call now!
                 const res = await fetch(`${API_BASE_URL}/analyze?symbol=${stock.symbol}`);
+                
                 if (!res.ok) {
                     const errorData = await res.json();
                     throw new Error(errorData.error || `Server responded with status ${res.status}`);
                 }
+
                 const data = await res.json();
-                renderAnalysis(data, stock);
-                // After rendering, fetch and draw the chart
+                renderAnalysis(data, stock); // Pass the full data object
                 await updateChart(stock.symbol, '1y');
+
             } catch (error) {
                 console.error("Analysis error:", error);
                 analysisView.innerHTML = `<div class="text-center p-8"><h3 class="text-2xl font-bold text-red-400">Analysis Failed</h3><p class="text-gray-300 mt-2">${error.message}</p> <button id="back-from-error-btn" class="btn bg-gray-600 hover:bg-gray-500 mt-4 px-4 py-2 rounded-lg">Back to List</button></div>`;
@@ -264,6 +282,7 @@
                 showAnalysisView();
             }
         }
+
 
         // --- NEW CHARTING FUNCTIONS ---
         async function updateChart(symbol, period) {
@@ -339,14 +358,24 @@
         }
 
         function renderAnalysis(data, stockInfo) {
-            const getRecommendationClass = (r) => (r && r.toLowerCase().includes('buy')) ? 'rec-buy' : (r && r.toLowerCase().includes('sell')) ? 'rec-sell' : 'rec-hold';
+            const getRecommendationClass = (r) => {
+                if (!r) return 'rec-hold';
+                const lowerR = r.toLowerCase();
+                if (lowerR.includes('strong buy')) return 'rec-buy';
+                if (lowerR.includes('buy')) return 'rec-buy';
+                if (lowerR.includes('sell')) return 'rec-sell';
+                return 'rec-hold';
+            };
             const recommendationClass = getRecommendationClass(data.recommendation);
+            
+            const val = (value, suffix = '') => (value !== null && value !== undefined) ? `${value}${suffix}` : 'N/A';
+            const metrics = data.advanced_metrics;
 
             analysisView.innerHTML = `
                 <div class="h-full flex flex-col">
                     <div class="flex items-center justify-between pb-4 border-b border-gray-700 flex-shrink-0">
                         <div class="flex items-center space-x-4">
-                            <img src="${stockInfo.logo || 'https://placehold.co/48x48/222/FFF?text=?'}" onerror="this.onerror=null;this.src='https://placehold.co/48x48/222/FFF?text=?';" class="w-12 h-12 rounded-full bg-white p-1" alt="${data.symbol} logo">
+                            <img src="${stockInfo.logo || 'https://placehold.co/48x48/222/FFF?text=?'}" onerror="this.onerror=null;this.src='https://placehold.co/48x48/222/FFF?text=?';" class="w-12 h-12 rounded-full bg-white p-1">
                             <div>
                                 <h2 class="text-3xl font-bold glow-text">${data.symbol}</h2>
                                 <p class="text-gray-400">${stockInfo.name}</p>
@@ -354,45 +383,75 @@
                         </div>
                         <div class="rec-btn ${recommendationClass}">${data.recommendation}</div>
                     </div>
-                    
-                    <!-- CHART SECTION -->
-                    <div class="my-4 h-48 md:h-64 bg-black bg-opacity-20 rounded-lg p-2">
-                         <div id="chart-container" class="h-full w-full relative">
-                            <canvas id="stockChartCanvas"></canvas>
-                        </div>
+
+                    <div class="my-4 h-48 md:h-64 bg-black bg-opacity-20 rounded-lg p-2 flex-shrink-0">
+                        <div id="chart-container" class="h-full w-full relative"><canvas id="stockChartCanvas"></canvas></div>
                     </div>
-                    <div class="flex justify-center space-x-2 mb-4">
+                    <div class="flex justify-center space-x-2 mb-4 flex-shrink-0">
                         <button class="time-range-btn btn text-xs bg-gray-700 hover:bg-gray-600 px-3 py-1 rounded-full" data-symbol="${data.symbol}" data-period="1mo">1M</button>
                         <button class="time-range-btn btn text-xs bg-gray-700 hover:bg-gray-600 px-3 py-1 rounded-full active" data-symbol="${data.symbol}" data-period="1y">1Y</button>
                         <button class="time-range-btn btn text-xs bg-gray-700 hover:bg-gray-600 px-3 py-1 rounded-full" data-symbol="${data.symbol}" data-period="ytd">YTD</button>
                         <button class="time-range-btn btn text-xs bg-gray-700 hover:bg-gray-600 px-3 py-1 rounded-full" data-symbol="${data.symbol}" data-period="max">Max</button>
                     </div>
 
+                    <div class="flex-grow overflow-y-auto pr-4 scrollable-content space-y-6">
+                        
+                        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                            <div class="lg:col-span-2 space-y-6">
+                                <div>
+                                    <h3 class="text-xl font-bold mb-2">AI Explanation</h3>
+                                    <div class="bg-black bg-opacity-20 p-4 rounded-lg text-gray-300 space-y-2">${convertMarkdownToHTML(data.explanation)}</div>
+                                </div>
+                                <div>
+                                    <h3 class="text-xl font-bold mb-2">Valuation Analysis</h3>
+                                    <div class="bg-black bg-opacity-20 p-4 rounded-lg grid grid-cols-2 gap-4 text-center">
+                                        <div>
+                                            <h4 class="text-sm text-gray-400">Graham Number</h4>
+                                            <p class="text-xl font-semibold">$${val(metrics.valuation_models.graham_number)}</p>
+                                        </div>
+                                        <div>
+                                            <h4 class="text-sm text-gray-400">Last Close Price</h4>
+                                            <p class="text-xl font-semibold">$${val(data.last_close)}</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
 
-                    <div class="flex-grow overflow-y-auto pr-4 scrollable-content">
-                        <div class="space-y-6">
-                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-center">
-                                <div class="bg-black bg-opacity-20 p-4 rounded-lg">
-                                    <h4 class="text-sm text-gray-400">Last Close</h4>
-                                    <p class="text-2xl font-semibold">$${data.last_close.toFixed(2)}</p>
+                            <div class="space-y-6">
+                                <div>
+                                    <h3 class="text-xl font-bold mb-2">Today's Data</h3>
+                                    <div class="bg-black bg-opacity-20 p-4 rounded-lg space-y-2 text-sm">
+                                        <div class="flex justify-between"><span class="text-gray-400">Open</span> <strong>$${val(metrics.daily_data.open)}</strong></div>
+                                        <div class="flex justify-between"><span class="text-gray-400">High</span> <strong>$${val(metrics.daily_data.high)}</strong></div>
+                                        <div class="flex justify-between"><span class="text-gray-400">Low</span> <strong>$${val(metrics.daily_data.low)}</strong></div>
+                                        <div class="flex justify-between"><span class="text-gray-400">Volume</span> <strong>${metrics.daily_data.volume ? metrics.daily_data.volume.toLocaleString() : 'N/A'}</strong></div>
+                                        <div class="flex justify-between border-t border-gray-700 pt-2 mt-2">
+                                            <span class="text-gray-400">AI Predicted Close</span> 
+                                            <strong class="text-green-400">$${val(data.predicted_close.toFixed(2))}</strong>
+                                        </div>
+                                    </div>
                                 </div>
-                                <div class="bg-black bg-opacity-20 p-4 rounded-lg">
-                                    <h4 class="text-sm text-gray-400">AI Predicted Next Close</h4>
-                                    <p class="text-2xl font-semibold">$${data.predicted_close.toFixed(2)}</p>
+                                <div>
+                                    <h3 class="text-xl font-bold mb-2">Financial Snapshot</h3>
+                                    <div class="bg-black bg-opacity-20 p-4 rounded-lg space-y-2 text-sm">
+                                    <div class="flex justify-between"><span class="text-gray-400">P/E Ratio</span> <strong>${val(metrics.valuation_stats['PE Ratio'])}</strong></div>
+                                    <div class="flex justify-between"><span class="text-gray-400">P/B Ratio</span> <strong>${val(metrics.valuation_stats['PB Ratio'])}</strong></div>
+                                    <div class="flex justify-between"><span class="text-gray-400">Risk (Volatility)</span> <strong>${val(metrics.risk)}</strong></div>
+                                    </div>
                                 </div>
                             </div>
-                            <div>
-                                <h3 class="text-xl font-bold mb-2">AI Explanation</h3>
-                                <div class="bg-black bg-opacity-20 p-4 rounded-lg text-gray-300 space-y-2">${data.explanation.replace(/\n/g, '<br>')}</div>
-                            </div>
-                            <div>
-                                <h3 class="text-xl font-bold mb-2">Key News Summary</h3>
-                                <div class="bg-black bg-opacity-20 p-4 rounded-lg text-gray-300 space-y-2">${data.latest_news_summary.replace(/\n/g, '<br>')}</div>
+                        </div>
+
+                        <div>
+                            <h3 class="text-xl font-bold mb-2">Key News Summary</h3>
+                            <div class="bg-black bg-opacity-20 p-4 rounded-lg text-gray-300 space-y-2">
+                                ${convertMarkdownToHTML(data.latest_news_summary)}
                             </div>
                         </div>
                     </div>
-                    <div class="flex-shrink-0 pt-4 mt-auto">
-                         <button id="back-to-list-btn" class="btn bg-gray-600 hover:bg-gray-500 w-full py-2 rounded-lg font-semibold">Back to List</button>
+
+                    <div class="flex-shrink-0 pt-4 mt-4 border-t border-gray-700">
+                        <button id="back-to-list-btn" class="btn bg-gray-600 hover:bg-gray-500 w-full py-2 rounded-lg font-semibold">Back to List</button>
                     </div>
                 </div>
             `;
