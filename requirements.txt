@@ -8,3 +8,4 @@ yfinance
 requests
 python-dotenv
 finnhub-python
+gunicorn
